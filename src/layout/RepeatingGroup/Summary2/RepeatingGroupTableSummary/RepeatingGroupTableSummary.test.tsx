@@ -185,6 +185,72 @@ describe('RepeatingGroupTableSummary', () => {
     },
   });
 
+  const layoutWithNestedRepeatingGroup = (): ILayoutCollection => ({
+    FormPage1: {
+      data: {
+        layout: [
+          {
+            id: 'repeating-group',
+            type: 'RepeatingGroup',
+            dataModelBindings: {
+              group: { dataType: defaultDataTypeMock, field: 'group' },
+            },
+            children: ['input1', 'inner-repeating-group'],
+            tableHeaders: ['input1'],
+            maxCount: 3,
+          },
+          {
+            id: 'input1',
+            type: 'Input',
+            dataModelBindings: {
+              simpleBinding: { dataType: defaultDataTypeMock, field: 'group.field1' },
+            },
+            textResourceBindings: {
+              title: 'Input 1',
+            },
+          },
+          {
+            id: 'inner-repeating-group',
+            type: 'RepeatingGroup',
+            dataModelBindings: {
+              group: { dataType: defaultDataTypeMock, field: 'group.inner' },
+            },
+            children: ['nested-input'],
+            maxCount: 3,
+          },
+          {
+            id: 'nested-input',
+            type: 'Input',
+            dataModelBindings: {
+              simpleBinding: { dataType: defaultDataTypeMock, field: 'group.inner.nestedField' },
+            },
+            textResourceBindings: {
+              title: 'Nested input',
+            },
+            // Only the grandchild uses a dataModel lookup in its readOnly expression. The outer group has to
+            // provide the data sources needed by this expression when deciding which children are editable.
+            readOnly: ['equals', ['dataModel', 'group.inner.nestedField'], 'locked'],
+          },
+        ],
+      },
+    },
+    FormPage2: {
+      data: {
+        layout: [
+          {
+            id: 'summary2',
+            type: 'Summary2',
+            target: {
+              type: 'component',
+              id: 'repeating-group',
+            },
+            overrides: [{ componentType: 'RepeatingGroup', display: 'table' }],
+          },
+        ],
+      },
+    },
+  });
+
   test('should focus the first input when clicking the edit button', async () => {
     const user = userEvent.setup();
     const navigate = jest.fn();
@@ -272,6 +338,23 @@ describe('RepeatingGroupTableSummary', () => {
     await waitFor(() =>
       expect(navigate).toHaveBeenCalledWith('repeating-group', 'repeating-group', expect.any(Object)),
     );
+  });
+
+  test('should evaluate readOnly expressions with dataModel lookups in nested repeating groups', async () => {
+    await render({
+      layout: layoutWithNestedRepeatingGroup(),
+      formData: {
+        group: [
+          {
+            [ALTINN_ROW_ID]: 'abc123',
+            field1: 'field1-row0',
+            inner: [{ [ALTINN_ROW_ID]: 'def456', nestedField: 'locked' }],
+          },
+        ],
+      },
+    });
+
+    expect(screen.getByRole('button', { name: /endre/i })).toBeInTheDocument();
   });
 
   test('should show edit button when a readOnly field precedes editable fields', async () => {
@@ -368,9 +451,14 @@ describe('RepeatingGroupTableSummary', () => {
   type IRenderProps = {
     navigate?: jest.Mock;
     layout?: ILayoutCollection;
+    formData?: object;
   };
 
-  const render = async ({ navigate, layout = createLayout() }: IRenderProps = {}) => {
+  const defaultFormData = {
+    group: [{ field1: 'field1-row0', field2: 'field2-row0', field3: 'field3-row0', [ALTINN_ROW_ID]: 'abc123' }],
+  };
+
+  const render = async ({ navigate, layout = createLayout(), formData = defaultFormData }: IRenderProps = {}) => {
     if (navigate) {
       jest.spyOn(useNavigatePageModule, 'useNavigateToComponent').mockReturnValue(navigate);
     }
@@ -384,9 +472,7 @@ describe('RepeatingGroupTableSummary', () => {
       initialPage: 'FormPage2',
       queries: {
         fetchLayouts: async () => layout,
-        fetchFormData: async () => ({
-          group: [{ field1: 'field1-row0', field2: 'field2-row0', field3: 'field3-row0', [ALTINN_ROW_ID]: 'abc123' }],
-        }),
+        fetchFormData: async () => formData,
         fetchLayoutSettings: async () => ({
           pages: {
             order: ['FormPage1', 'FormPage2'],

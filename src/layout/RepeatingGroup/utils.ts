@@ -69,6 +69,33 @@ function getReadOnlyExpression(component: CompExternal): ExprValToActualOrExpr<E
   return 'readOnly' in component ? component.readOnly : undefined;
 }
 
+function getContainerChildren(component: CompExternal): string[] {
+  const componentDef = getComponentDef(component.type);
+  if (componentDef.category !== CompCategory.Container) {
+    return [];
+  }
+  return (component as { children?: string[] }).children ?? [];
+}
+
+/**
+ * Collects the readOnly expressions for a component and all its descendants inside containers. This has to match
+ * the traversal in collectEditableChildren(), so that the expression data sources cover every expression evaluated.
+ */
+function collectReadOnlyExpressions(
+  baseComponentId: string,
+  layoutLookups: LayoutLookups,
+  acc: ExprValToActualOrExpr<ExprVal.Boolean>[],
+) {
+  const component = layoutLookups.getComponent(baseComponentId);
+  const readOnly = getReadOnlyExpression(component);
+  if (readOnly !== undefined) {
+    acc.push(readOnly);
+  }
+  for (const childId of getContainerChildren(component)) {
+    collectReadOnlyExpressions(childId, layoutLookups, acc);
+  }
+}
+
 function isReadOnlyComponent(
   childComponent: CompExternal,
   dataSources: ExpressionDataSources,
@@ -135,8 +162,7 @@ function collectEditableChildren(
   const componentDef = getComponentDef(childComponent.type);
 
   if (componentDef.category === CompCategory.Container) {
-    const containerChildren = (childComponent as { children?: string[] }).children ?? [];
-    for (const grandChildId of containerChildren) {
+    for (const grandChildId of getContainerChildren(childComponent)) {
       collectEditableChildren(
         grandChildId,
         layoutLookups,
@@ -338,14 +364,13 @@ export const RepGroupHooks = {
     const layoutLookups = useLayoutLookups();
     const component = layoutLookups.getComponent(baseComponentId, 'RepeatingGroup');
     const groupBinding = useDataModelBindingsFor(baseComponentId, 'RepeatingGroup')?.group;
-    const readOnlyExpressions = useMemo(
-      () =>
-        childrenBaseIds
-          .map((id) => layoutLookups.getComponent(id))
-          .map(getReadOnlyExpression)
-          .filter((value) => value !== undefined),
-      [childrenBaseIds, layoutLookups],
-    );
+    const readOnlyExpressions = useMemo(() => {
+      const expressions: ExprValToActualOrExpr<ExprVal.Boolean>[] = [];
+      for (const childId of childrenBaseIds) {
+        collectReadOnlyExpressions(childId, layoutLookups, expressions);
+      }
+      return expressions;
+    }, [childrenBaseIds, layoutLookups]);
     const dataSources = useExpressionDataSources(readOnlyExpressions);
 
     const editableChildIds: string[] = [];
